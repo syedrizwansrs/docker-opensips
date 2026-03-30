@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # --build-arg lets CI override the tag; locally you can pin a version
-ARG OPENSIPS_TAG=latest
+ARG OPENSIPS_TAG=3.4
 FROM opensips/opensips:${OPENSIPS_TAG}
 
 LABEL org.opencontainers.image.source="https://github.com/connexcs/connexcs-opensips"
