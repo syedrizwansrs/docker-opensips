@@ -1,0 +1,120 @@
+name: Build ConnexCS OpenSIPS
+
+on:
+  # Check for upstream changes every 6 hours
+  schedule:
+    - cron: '0 */6 * * *'
+
+  # Rebuild any time Dockerfile or modules list changes
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - 'modules.env'
+
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: connexcs/opensips-custom   # → ghcr.io/connexcs/opensips-custom
+  UPSTREAM_IMAGE: opensips/opensips:latest
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # to commit the digest file back
+      packages: write       # to push to GHCR
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Upstream digest check ────────────────────────────────────────────
+      - name: Get upstream digest
+        id: upstream
+        run: |
+          DIGEST=$(docker manifest inspect ${{ env.UPSTREAM_IMAGE }} \
+            --verbose 2>/dev/null \
+            | jq -r 'if type == "array" then .[0].Descriptor.digest else .config.digest end')
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Upstream digest: $DIGEST"
+
+      - name: Read last known digest
+        id: last
+        run: |
+          if [ -f .upstream-digest ]; then
+            echo "digest=$(cat .upstream-digest)" >> "$GITHUB_OUTPUT"
+          else
+            echo "digest=none" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether to build
+        id: decision
+        run: |
+          UPSTREAM="${{ steps.upstream.outputs.digest }}"
+          LAST="${{ steps.last.outputs.digest }}"
+          # Always build on push/workflow_dispatch; only on digest change for schedule
+          EVENT="${{ github.event_name }}"
+          if [ "$EVENT" != "schedule" ] || [ "$UPSTREAM" != "$LAST" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "Build needed (event=$EVENT, upstream=$UPSTREAM, last=$LAST)"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "No change detected — skipping build"
+          fi
+
+      # ── Build & push ─────────────────────────────────────────────────────
+      - name: Log in to GHCR
+        if: steps.decision.outputs.build == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        if: steps.decision.outputs.build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata (tags + labels)
+        if: steps.decision.outputs.build == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+            type=raw,value={{date 'YYYY-MM-DD'}}
+
+      - name: Build and push
+        if: steps.decision.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Embed the upstream digest as a build arg label for traceability
+          build-args: |
+            OPENSIPS_TAG=latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Persist the new digest so next run can compare ───────────────────
+      - name: Save upstream digest
+        if: steps.decision.outputs.build == 'true'
+        run: |
+          echo "${{ steps.upstream.outputs.digest }}" > .upstream-digest
+
+      - name: Commit digest file
+        if: steps.decision.outputs.build == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .upstream-digest
+          git diff --staged --quiet || \
+            git commit -m "chore: update upstream digest [${{ steps.upstream.outputs.digest }}]"
+          git push
