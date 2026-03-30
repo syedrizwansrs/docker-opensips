@@ -17,7 +17,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: connexcs/opensips-custom   # → ghcr.io/connexcs/opensips-custom
+  IMAGE_NAME: syedrizwansrs/docker-opensips   # → ghcr.io/syedrizwansrs/docker-opensips
   UPSTREAM_IMAGE: opensips/opensips:latest
 
 jobs:
