@@ -18,7 +18,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: syedrizwansrs/docker-opensips   # → ghcr.io/syedrizwansrs/docker-opensips
-  UPSTREAM_IMAGE: opensips/opensips:latest
+  UPSTREAM_IMAGE: opensips/opensips:3.4
 
 jobs:
   check-and-build:
@@ -99,7 +99,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           # Embed the upstream digest as a build arg label for traceability
           build-args: |
-            OPENSIPS_TAG=latest
+            OPENSIPS_TAG=3.4
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
